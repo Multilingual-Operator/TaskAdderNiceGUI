@@ -281,6 +281,7 @@ class AnnotationUI:
 
     async def start_task(self):
         """Start the task annotation process"""
+        await self.framework.setup_element_tracking()
         if not self.browser_launched or not self.framework.page:
             ui.notify("Browser not launched successfully.", type='negative')
             return
@@ -497,6 +498,39 @@ class AnnotationUI:
         await self.framework.stop()
         self.add_to_log("Cleanup finished.")
 
+    # New method to handle option selection
+    def select_option(self, option):
+        # Set the value input to the selected option
+        self.value_input.value = option
+        self.action_value = option
+
+        # Hide options list after selection
+        ui.get_by_id('options_list').classes('w-full hidden')
+
+    def on_action_select(self, e):
+        # Update the selected action
+        self.selected_action = e.value
+
+        # Clear previous options
+        self.options_container.clear()
+
+        # Show or hide options based on the selected action
+        if self.selected_action == 'select':
+            # Get UI element from page with XPath
+            self.option_list.classes('w-full')  # Show the card
+
+            # Populate with options (these would come from your actual available elements)
+            # For this example, I'll use placeholder options
+            options = ['Button #1', 'Input field #2', 'Link #3', 'Image #4']
+
+            for option in options:
+                with self.options_container:
+                    ui.button(option, on_click=lambda opt=option: self.select_option(opt)) \
+                        .classes('w-full text-left mb-1')
+        else:
+            # Hide options for other action types
+            self.option_list.classes('w-full hidden')
+
     # --- UI Setup Method ---
     def setup_ui(self):
         self.main_container =ui.column().classes('h-screen w-full fixed left-0 top-0 bg-gray-100 overflow-auto p-1')
@@ -533,12 +567,17 @@ class AnnotationUI:
             # Action Recording Section
             with ui.column().classes('w-full mb-1'):
                 self.action_select = ui.select(ACTION_TYPES, label='Action', value=self.selected_action,
-                                               on_change=lambda e: setattr(self, 'selected_action', e.value)) \
+                                               on_change=self.on_action_select) \
                     .props('dense outlined').classes('w-full')
 
                 self.value_input = ui.input('Value (if applicable)', value=self.action_value,
                                             on_change=lambda e: setattr(self, 'action_value', e.value)) \
                     .props('dense outlined').classes('w-full')
+
+                # Options list (initially hidden)
+                self.option_list = ui.card().classes('w-full hidden')
+                with self.option_list:
+                    self.options_container = ui.column().classes('w-full')
 
                 self.record_button = ui.button('Record Action', on_click=self.record_action) \
                     .props('icon=radio_button_checked').classes('bg-accent text-white w-full')
