@@ -40,6 +40,16 @@
     if (window._annotationClickListener) {
         window.removeEventListener('click', window._annotationClickListener, true);
     }
+    if (window._annotationKeydownListener) {
+        window.removeEventListener('keydown', window._annotationKeydownListener, true);
+    }
+    if (window._annotationSelectListener) {
+        window.removeEventListener('mousedown', window._annotationSelectListener, true);
+    }
+    if (window._annotationChangeListener) {
+        window.removeEventListener('change', window._annotationChangeListener, true);
+    }
+
 
     // Hover handler
     window._annotationMouseoverListener = (event) => {
@@ -58,6 +68,34 @@
         }
         window._currentHighlightedElement = element;
     };
+    // Add these new event listeners to prevent select dropdown and input typing
+window._annotationKeydownListener = (event) => {
+    if (window._annotationMode) {
+        // Prevent typing in input fields
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+    }
+};
+
+window._annotationSelectListener = (event) => {
+    if (window._annotationMode) {
+        // Prevent select elements from opening
+        if (event.target.tagName === 'SELECT') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+    }
+};
+
+// Prevent change events on form elements
+window._annotationChangeListener = (event) => {
+    if (window._annotationMode) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }
+};
     window.addEventListener('mouseover', window._annotationMouseoverListener);
 
     // Mouse out handler
@@ -111,7 +149,40 @@
         // Notify Python that an element was selected
         fetch('http://127.0.0.1:8080/api/notify-element-selected', {mode: 'no-cors' });
     };
-    window.addEventListener('click', window._annotationClickListener, true);  // Use capture
+
+    // Add these new event listeners to prevent select dropdown and input typing
+    window._annotationKeydownListener = (event) => {
+        if (window._annotationMode) {
+            // Prevent typing in input fields
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }
+    };
+
+    window._annotationSelectListener = (event) => {
+        if (window._annotationMode) {
+            // Prevent select elements from opening
+            if (event.target.tagName === 'SELECT') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }
+    };
+
+    // Prevent change events on form elements
+    window._annotationChangeListener = (event) => {
+        if (window._annotationMode) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+    };
+
+    window.addEventListener('click', window._annotationClickListener, true);
+    window.addEventListener('keydown', window._annotationKeydownListener, true);
+    window.addEventListener('mousedown', window._annotationSelectListener, true);
+    window.addEventListener('change', window._annotationChangeListener, true);
 
     // Function to unlock element (will be called from Python)
     window.unlockElement = () => {
@@ -129,8 +200,13 @@
     window.setAnnotationMode = (enabled) => {
         window._annotationMode = !!enabled; // Ensure boolean
         console.log('Annotation mode set to:', window._annotationMode);
-        if (!window._annotationMode) { // If disabling, ensure unlock
-            window.unlockElement();
+
+        // Set cursor style on document body when in annotation mode
+        if (window._annotationMode) {
+            document.body.style.cursor = 'crosshair';
+        } else {
+            document.body.style.cursor = '';
+            window.unlockElement(); // Ensure unlock when disabling
         }
     };
 

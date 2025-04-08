@@ -4,13 +4,11 @@ playwright install chromium
 ```
 
 ### TODO:
-- Select 
-  - Disable select in annotation mode
+- Select
   - show selected options in FrameWorks UI
   - filter selected options using value input
   - select the option wrote in value input in chrome
-- Type 
-  - Disable Type in annotation mode
+- Type
   - type the text in value input in chrome 
 - Click works fine only if the element is visible all the time
 - Recording
