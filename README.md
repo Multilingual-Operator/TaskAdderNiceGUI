@@ -4,9 +4,6 @@ playwright install chromium
 ```
 
 ### TODO:
-- Select
-  - select the option wrote in value input in chrome
-- Click works fine only if the element is visible all the time
 - Recording
   - start recording when task started
   - end recording when task finished
@@ -14,3 +11,6 @@ playwright install chromium
 - Dataset building
   - adding before action state to the dataset
   - save the added task as a zip 
+- change task description anytime
+- after finish task show the option to save/discard the task
+- Click works fine only if the element is visible at the time of click

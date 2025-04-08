@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from idlelib.window import add_windows_to_menu
 from typing import List, Dict, Any, Optional, Tuple
+from difflib import SequenceMatcher
 
 # Import NiceGUI components
 from nicegui import Client, app, ui, context
@@ -177,8 +178,6 @@ class AnnotationFramework:
             return True
         except Exception as e:
             self.logger.error(f"Error clicking element ({element_data.get('xpath', 'N/A')}): {e}")
-            # Try to unlock element in browser just in case it helps
-            await self.unlock_element_in_browser()
             return False
 
     async def type_text(self, element_data: Dict, text: str):
@@ -193,10 +192,28 @@ class AnnotationFramework:
             return True
         except Exception as e:
             self.logger.error(f"Error typing into element ({element_data.get('xpath', 'N/A')}): {e}")
-            # Try to unlock element in browser
-            await self.unlock_element_in_browser()
             return False
 
+    async def select_option(self, element_data: Dict, text: str):
+        """Type text into an element based on element data"""
+        if not self.page:
+            self.logger.error("No page available to select")
+            return False
+        try:
+            element_locator = await self._find_element(element_data)
+
+            best_option = [-1, "", -1]
+            for i in range(await element_locator.locator("option").count()):
+                option = await element_locator.locator("option").nth(i).inner_text()
+                similarity = SequenceMatcher(None, option, text).ratio()
+                if similarity > best_option[2]:
+                    best_option = [i, option, similarity]
+            await element_locator.select_option(index=best_option[0], timeout=10000)
+            self.logger.info(f"selected '{text}' into element: {element_data.get('tagName')}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error selection option into element ({element_data.get('xpath', 'N/A')}): {e}")
+            return False
 
 # --- NiceGUI Application Class ---
 class AnnotationUI:
@@ -341,10 +358,20 @@ class AnnotationUI:
 
                         self.action_select.value = "select"
                         self.selected_action = "select"
+                    elif tag == "INPUT" or tag == "TEXTAREA":
+                        # For input fields and textareas, we typically use "type" action
+                        self.action_select.value = "type"
+                        self.selected_action = "type"
+                    elif tag in ["BUTTON", "A", "DIV", "SPAN", "LI", "IMG"]:
+                        # For clickable elements like buttons, links, and other interactive elements
+                        self.action_select.value = "click"
+                        self.selected_action = "click"
 
                     # Auto-populate value if applicable
                     if self.selected_action == "type" and tag in ["INPUT", "TEXTAREA"]:
                         self.value_input.value = element_data.get('value', '')
+                    else:
+                        self.value_input.value = ""
                 else:
                     self.add_to_log("Failed to retrieve selected element data from browser.")
                     self.update_status("Error fetching element data. Try selecting again.")
@@ -501,11 +528,7 @@ class AnnotationUI:
         elif action_type == "type":
             action_executed = await self.framework.type_text(self.selected_element, action_value)
         elif action_type == "select":
-             # Playwright's select_option might need value/label/index from element_data
-             # This needs more implementation based on how 'select' should work
-             self.add_to_log("'select' action execution not fully implemented yet.")
-             # Placeholder: Assume success for now
-             action_executed = True # Needs real implementation
+             action_executed = await self.framework.select_option(self.selected_element, action_value)
         else:
              # Should not happen if action types are validated
              self.add_to_log(f"Warning: Unknown action type '{action_type}' encountered during execution.")
