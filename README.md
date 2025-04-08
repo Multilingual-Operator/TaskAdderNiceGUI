@@ -7,6 +7,5 @@ playwright install chromium
 
 - Dataset building
   - adding before actions' state to the dataset
-- change task description anytime
-- after finish task show the option to save/discard the task
+  - Making an application using this code! (windows/Mac/linux)
 - Click works fine only if the element is visible at the time of click

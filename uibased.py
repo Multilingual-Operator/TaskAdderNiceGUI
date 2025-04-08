@@ -9,6 +9,8 @@ from difflib import SequenceMatcher
 from screeninfo import get_monitors
 import random
 import string
+import zipfile
+import shutil
 
 # Import NiceGUI components
 from nicegui import app, ui, context
@@ -300,7 +302,7 @@ class AnnotationUI:
         self.value_input = None
         self.action_select = None
         self.task_button = None
-        self.task_input = None
+        self.task_goal = None
         self.launch_button = None
         self.url_input = None
         self.main_container = None
@@ -370,7 +372,7 @@ class AnnotationUI:
             self.add_to_log(f"Browser launched successfully for {self.url}")
             self.browser_launched = True
             # Enable task start, disable URL section
-            self.task_input.enable()
+            self.task_goal.enable()
             self.task_button.enable()
             self.update_status("Browser ready. Describe and start your task.")
 
@@ -402,7 +404,6 @@ class AnnotationUI:
 
         # Enable action recording section, disable task start section
         self.value_input.disable()
-        self.task_input.disable()
         self.task_button.disable()
 
         # Enable element tracking in browser via JS function
@@ -672,6 +673,7 @@ class AnnotationUI:
         except Exception as e:
             self.add_to_log(f"Error saving task data: {e}")
             ui.notify(f"Failed to save task data: {e}", type='negative')
+        self.update_zip_folder()
 
         # Reset UI state for a new task (keep browser open)
         self.selected_element = None
@@ -681,12 +683,28 @@ class AnnotationUI:
         self.value_input.disable()
         self.record_button.disable()
 
-        self.task_input.enable()
+        self.task_goal.enable()
         self.task_button.enable()  # Allow starting a new task
         self.task_description = ""  # Clear description
-        self.task_input.update()
+        self.task_goal.update()
 
         self.update_status("Task finished and saved. Ready for new task or close browser.")
+
+
+    def update_zip_folder(self):
+        # Define the paths
+        json_file_path = os.path.join(self.framework.main_path, "actions.json")
+        trace_zip_path = os.path.join(self.framework.main_path, "playwright_traces", "main_trace.zip")
+        final_zip_path = f"{self.framework.main_path}.zip"
+
+        # Add the actions.json file to the ZIP
+        with zipfile.ZipFile(trace_zip_path, 'a') as zip_ref:
+            # The second parameter is the arcname (path within the ZIP)
+            # Here we're adding it to the root of the ZIP
+            zip_ref.write(json_file_path, os.path.basename(json_file_path))
+        shutil.move(trace_zip_path, final_zip_path)
+
+        print(f"Successfully updated ZIP and moved to {final_zip_path}")
 
     async def save_task_data(self):
         """Save task data to JSON file"""
@@ -740,7 +758,7 @@ class AnnotationUI:
                 # Create a row to hold the task input and start button side by side
                 with ui.row().classes('w-full items-center align-top'):
                     # Replace input with textarea for multi-line support
-                    self.task_input = ui.textarea('Task Description', placeholder='e.g., Search for product X',
+                    self.task_goal = ui.textarea('Task Description', placeholder='e.g., Search for product X',
                                                   value=self.task_description,
                                                   on_change=lambda e: setattr(self, 'task_description', e.value)) \
                         .props('dense outlined rows=2').classes('flex-grow').bind_enabled_from(self,
