@@ -332,6 +332,16 @@ class AnnotationUI:
                     self.action_select.enabled = True
                     self.value_input.enabled = True
 
+                    if tag == "SELECT":
+                        # Fetch dropdown options
+                        self.selected_element_options = await self.get_dropdown_options(element_data)
+                        if self.selected_element_options:
+                            self.add_to_log(f"Found {len(self.selected_element_options)} dropdown options")
+                            self.create_options_dropdown()
+
+                        self.action_select.value = "select"
+                        self.selected_action = "select"
+
                     # Auto-populate value if applicable
                     if self.selected_action == "type" and tag in ["INPUT", "TEXTAREA"]:
                         self.value_input.value = element_data.get('value', '')
@@ -345,6 +355,97 @@ class AnnotationUI:
                     self.value_input.enabled = False
         except Exception as e:
             print(f"Error in handle_element_selection: {e}")
+
+    async def get_dropdown_options(self, element_data):
+        """Fetch options from a dropdown element using Python and browser automation"""
+        try:
+            # Extract the xpath from element_data
+            xpath = element_data.get('xpath')
+            if not xpath:
+                self.add_to_log("Cannot retrieve dropdown options: No XPath available")
+                return []
+
+            # Get all option elements within the SELECT
+            options_locator = self.framework.page.locator(f"xpath={xpath}//option")
+            options_count = await options_locator.count()
+
+            options = []
+            # Extract data from each option
+            for i in range(options_count):
+                option = options_locator.nth(i)
+
+                # Get properties of each option
+                value = await option.get_attribute("value") or ""
+                text = await option.text_content() or ""
+
+                options.append({
+                    'value': value,
+                    'text': text.strip()
+                })
+
+            return options
+        except Exception as e:
+            print(f"Error getting dropdown options: {e}")
+            self.add_to_log(f"Could not retrieve dropdown options: {str(e)}")
+            return []
+
+    def create_options_dropdown(self):
+        """Create a proper dropdown for selecting options from the page's SELECT element"""
+        try:
+            self.add_to_log("try to make dropdown")
+            # First remove the hidden class to make the container visible
+            self.options_dropdown_container.classes("w-full p-1 mt-1")
+            self.options_dropdown_container.clear()
+            # Create the select dropdown
+            with self.options_dropdown_container:
+                # Create the dropdown select
+                option_items = [f"{opt['text']}" for opt in self.selected_element_options]
+                print(option_items)
+                # Create the dropdown with options
+                self.options_select = ui.select(
+                    options=option_items,
+                    value=None,
+                    on_change=self.handle_option_selection
+                ).classes('w-full').props('use-input filter persistent')
+
+                # Add a confirmation button
+                ui.button("Confirm Selected Option", on_click=self.confirm_option_selection).classes('mt-1')
+
+                # Force UI update
+                ui.update()
+        except Exception as e:
+            print(f"Error creating options dropdown: {e}")
+            self.add_to_log(f"Could not create dropdown selector: {str(e)}")
+
+    def handle_option_selection(self, e):
+        """Handle when user selects an option from the dropdown"""
+        try:
+            # Find the selected option in our list
+            selected_text = e.value
+            for i, opt in enumerate(self.selected_element_options):
+                if f"{opt['text']}" == selected_text:
+                    # Preview the selection
+                    self.add_to_log(f"Selected option: {opt['text']}")
+                    self.current_selected_option = opt
+                    break
+        except Exception as e:
+            print(f"Error handling option selection: {e}")
+            self.add_to_log(f"Error selecting option: {str(e)}")
+
+    def confirm_option_selection(self):
+        """Confirm and apply the selected option"""
+        try:
+            if self.current_selected_option:
+                # Update the value input with the selected option value
+                self.value_input.value = self.current_selected_option['text']
+                self.action_value = self.current_selected_option['text']
+
+                # Update UI
+                self.add_to_log(f"Confirmed option: {self.current_selected_option['text']}")
+                self.update_status(f"Option selected: {self.current_selected_option['text']}")
+        except Exception as e:
+            print(f"Error confirming option selection: {e}")
+            self.add_to_log(f"Error applying selection: {str(e)}")
 
     async def record_action(self):
         """Record the selected action and value for the selected element."""
@@ -498,38 +599,14 @@ class AnnotationUI:
         await self.framework.stop()
         self.add_to_log("Cleanup finished.")
 
-    # New method to handle option selection
-    def select_option(self, option):
-        # Set the value input to the selected option
-        self.value_input.value = option
-        self.action_value = option
-
-        # Hide options list after selection
-        ui.get_by_id('options_list').classes('w-full hidden')
 
     def on_action_select(self, e):
         # Update the selected action
         self.selected_action = e.value
-
-        # Clear previous options
-        self.options_container.clear()
-
-        # Show or hide options based on the selected action
-        if self.selected_action == 'select':
-            # Get UI element from page with XPath
-            self.option_list.classes('w-full')  # Show the card
-
-            # Populate with options (these would come from your actual available elements)
-            # For this example, I'll use placeholder options
-            options = ['Button #1', 'Input field #2', 'Link #3', 'Image #4']
-
-            for option in options:
-                with self.options_container:
-                    ui.button(option, on_click=lambda opt=option: self.select_option(opt)) \
-                        .classes('w-full text-left mb-1')
+        if self.selected_action == "select":
+            self.create_options_dropdown()
         else:
-            # Hide options for other action types
-            self.option_list.classes('w-full hidden')
+            self.options_dropdown_container.clear()
 
     # --- UI Setup Method ---
     def setup_ui(self):
@@ -574,10 +651,10 @@ class AnnotationUI:
                                             on_change=lambda e: setattr(self, 'action_value', e.value)) \
                     .props('dense outlined').classes('w-full')
 
-                # Options list (initially hidden)
-                self.option_list = ui.card().classes('w-full hidden')
-                with self.option_list:
-                    self.options_container = ui.column().classes('w-full')
+
+                # Create options dropdown container (initially hidden)
+                with ui.element('div').classes('w-full mt-1') as self.options_dropdown_container:
+                    pass
 
                 self.record_button = ui.button('Record Action', on_click=self.record_action) \
                     .props('icon=radio_button_checked').classes('bg-accent text-white w-full')

@@ -5,8 +5,6 @@ playwright install chromium
 
 ### TODO:
 - Select
-  - show selected options in FrameWorks UI
-  - filter selected options using value input
   - select the option wrote in value input in chrome
 - Type
   - type the text in value input in chrome 
