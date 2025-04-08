@@ -21,10 +21,10 @@ from playwright.async_api import async_playwright, Playwright, Page
 # Constants
 ACTION_TYPES = ["click", "type", "select", "ignore", "finish_task", "final_click"]
 DEFAULT_URL = "https://www.digikala.com/"
-ANNOTATION_DATA_DIR = "annotation_data"
 with open("mouse_control.js") as f:
     mouse_control_js = f.read()
-
+with open("new_tab_link_prevention.js") as f:
+    new_tab_prevention_js = f.read()
 
 class AnnotationFramework:
     def __init__(self):
@@ -36,12 +36,15 @@ class AnnotationFramework:
         self.task_name = None
         self.is_tracing = False
         self.root_path = os.getcwd()
+        self.screen_counter = 0
 
     async def set_task_name(self):
         chars = string.ascii_lowercase + string.ascii_uppercase + string.digits
         self.task_name = ''.join(random.choice(chars) for _ in range(8))
         os.makedirs(self.main_path, exist_ok=True)
         os.makedirs(os.path.join(self.main_path, 'playwright_traces'), exist_ok=True)
+        os.makedirs(os.path.join(self.main_path, 'screenshots'), exist_ok=True)
+        self.screen_counter = 0
 
     @staticmethod
     def _setup_logger():
@@ -55,16 +58,16 @@ class AnnotationFramework:
             logger.addHandler(handler)
         return logger
 
-    async def start_playwright_tracing_chunk(self, time_step):
+    async def start_playwright_tracing_chunk(self):
         # await self.context.tracing.start_chunk(
-        #     title=f'Step-{time_step}',
+        #     title=f'Step_{self.screen_counter}',
         #     name=f"{time_step}"
         # )
         # self.logger.info(f"sstart recording a chunk")
         pass
 
-    async def stop_playwright_tracing_chunk(self, time_step):
-        # path =os.path.join(self.main_path, 'playwright_traces', f'{time_step}.zip')
+    async def stop_playwright_tracing_chunk(self):
+        # path =os.path.join(self.main_path, 'playwright_traces',  f'Step_{self.screen_counter}.zip')
         # self.logger.info(f"save action recording to {path}")
         # await self.context.tracing.stop_chunk(
         #     path=path)
@@ -175,9 +178,10 @@ class AnnotationFramework:
 
         try:
             await self.page.evaluate(mouse_control_js)
+            await self.page.evaluate(new_tab_prevention_js)
             # Expose Python function to be called from JS
             # Use a unique name or check if already exposed if page reloads cause issues
-            self.logger.info("Element tracking script injected and callback exposed.")
+            self.logger.info("Element tracking script injected.")
         except Exception as e:
             self.logger.error(f"Error setting up 'element racking': {e}")
             raise
@@ -269,6 +273,22 @@ class AnnotationFramework:
         except Exception as e:
             self.logger.error(f"Error typing into element ({element_data.get('xpath', 'N/A')}): {e}")
             return False
+
+    async def get_raw_html(self):
+        return await self.page.evaluate("document.documentElement.outerHTML")
+
+    async def get_accessibility_tree(self):
+        return self.page.accessibility.snapshot()
+
+    async def get_screenshot(self):
+        try:
+            path = os.path.join(self.main_path, 'screenshots', f"{self.screen_counter}.png")
+            await self.page.screenshot(path=path)
+            self.screen_counter+=1
+            return path
+        except Exception as e:
+            self.logger.info(f"Failed to take screenshot: {e}")
+            return None
 
     async def select_option(self, element_data: Dict, text: str):
         """Type text into an element based on element data"""
@@ -597,13 +617,15 @@ class AnnotationUI:
         await self.framework.unlock_element_in_browser()
         await self.framework.set_annotation_mode(False)
         await asyncio.sleep(0.1)
-        await self.framework.start_playwright_tracing_chunk(action_time.isoformat().replace(":", "_").replace(".", "_"))
+        await self.framework.start_playwright_tracing_chunk()
         # --- Create and Store Action ---
         action_record = {
             "type": action_type,
             "value": action_value,
             "element": self.selected_element,  # Store details of the element acted upon
-            "timestamp": action_time.isoformat().replace(":", "_").replace(".", "_"),
+            "timestamp": action_time.isoformat(),
+            "screenshot": await self.framework.get_screenshot(),
+            "raw_html": await self.framework.get_raw_html()
         }
         self.task_actions.append(action_record)
         log_msg = f"Recorded: {action_type}"
@@ -626,7 +648,7 @@ class AnnotationUI:
             self.add_to_log(f"Warning: Unknown action type '{action_type}' encountered during execution.")
             action_executed = True  # Treat as success to proceed
 
-        await self.framework.stop_playwright_tracing_chunk(action_time.isoformat().replace(":", "_").replace(".", "_"))
+        await self.framework.stop_playwright_tracing_chunk()
         # --- Post-Action Cleanup ---
         await self.framework.set_annotation_mode(True)
         # Clear value input and selected element state
@@ -644,6 +666,7 @@ class AnnotationUI:
         self.record_button.disable()
         self.action_select.disable()
         self.value_input.disable()
+        await self.framework.setup_element_tracking()
         if action_type == "final_click":
             await self.finish_task()
 
@@ -667,11 +690,13 @@ class AnnotationUI:
         try:
             filename = await self.save_task_data()
             self.add_to_log(f"Task data saved successfully to {filename}")
+            self.framework.logger.info(f"Task data saved successfully to {filename}")
             ui.notify(f"Task data saved to {filename}", type='positive')
             await self.framework.end_recording()
 
         except Exception as e:
             self.add_to_log(f"Error saving task data: {e}")
+            self.framework.logger.error(f"Failed to save task data: {e}")
             ui.notify(f"Failed to save task data: {e}", type='negative')
         self.update_zip_folder()
 
@@ -695,6 +720,8 @@ class AnnotationUI:
         # Define the paths
         json_file_path = os.path.join(self.framework.main_path, "actions.json")
         trace_zip_path = os.path.join(self.framework.main_path, "playwright_traces", "main_trace.zip")
+        screenshot_folder = os.path.join(self.framework.main_path, "screenshots")
+
         final_zip_path = f"{self.framework.main_path}.zip"
 
         # Add the actions.json file to the ZIP
@@ -702,6 +729,16 @@ class AnnotationUI:
             # The second parameter is the arcname (path within the ZIP)
             # Here we're adding it to the root of the ZIP
             zip_ref.write(json_file_path, os.path.basename(json_file_path))
+            # Add screenshots to the ZIP
+            for root, _, files in os.walk(screenshot_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Calculate the arcname (path within the ZIP)
+                    arcname = os.path.relpath(file_path, screenshot_folder)
+                    zip_ref.write(file_path, os.path.join("screenshots",
+                                                          arcname))  # Adds screenshots to a 'screenshots' folder inside the zip
+
+
         shutil.move(trace_zip_path, final_zip_path)
 
         print(f"Successfully updated ZIP and moved to {final_zip_path}")
