@@ -6,8 +6,6 @@ playwright install chromium
 ### TODO:
 - Select
   - select the option wrote in value input in chrome
-- Type
-  - type the text in value input in chrome 
 - Click works fine only if the element is visible all the time
 - Recording
   - start recording when task started
