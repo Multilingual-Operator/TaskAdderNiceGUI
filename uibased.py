@@ -19,7 +19,7 @@ from nicegui import app, ui, context
 from playwright.async_api import async_playwright, Playwright, Page
 
 # Constants
-ACTION_TYPES = ["click", "type", "select", "ignore", "finish_task", "final_click"]
+ACTION_TYPES = ["click", "type", "select", "ignore", "final_click"]
 DEFAULT_URL = "https://www.digikala.com/"
 with open("mouse_control.js") as f:
     mouse_control_js = f.read()
@@ -407,16 +407,24 @@ class AnnotationUI:
 
     async def start_task(self):
         """Start the task annotation process"""
-        await self.framework.set_task_name()
-        await self.framework.start_recording()
-        await self.framework.refresh_page()
-        await self.framework.setup_element_tracking()
+
         if not self.browser_launched or not self.framework.page:
             ui.notify("Browser not launched successfully.", type='negative')
             return
         if not self.task_description:
             ui.notify("Please enter a task description.", type='warning')
             return
+        if self.task_started:
+            await self.finish_task()
+            return
+
+        await self.framework.set_task_name()
+        await self.framework.start_recording()
+        await self.framework.refresh_page()
+        await self.framework.setup_element_tracking()
+
+        self.task_button.props('icon=stop')
+        ui.update(self.task_button)
 
         self.task_started = True
         self.task_actions = []
@@ -604,11 +612,6 @@ class AnnotationUI:
                 ui.notify("No element is currently selected to ignore.", type='warning')
             return  # Stop processing here for ignore action
 
-        # --- Handle FINISH_TASK action ---
-        if action_type == "finish_task":
-            await self.finish_task()
-            return  # Stop processing here for finish action
-
         # --- Handle other actions (click, type, select) ---
         if not self.selected_element:
             ui.notify("Please select an element in the browser first.", type='warning')
@@ -672,6 +675,9 @@ class AnnotationUI:
 
     async def finish_task(self):
         """Finalize the task and save data."""
+        self.task_button.props('icon=play_arrow')
+        ui.update(self.task_button)
+
         if not self.task_started:
             ui.notify("No task is currently active.", type='warning')
             return
