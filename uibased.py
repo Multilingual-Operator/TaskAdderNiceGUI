@@ -4,23 +4,24 @@ import logging
 import os
 import json
 from datetime import datetime
-from idlelib.window import add_windows_to_menu
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional
 from difflib import SequenceMatcher
+from screeninfo import get_monitors
+import random
+import string
 
 # Import NiceGUI components
-from nicegui import Client, app, ui, context
+from nicegui import app, ui, context
 
 # Import Playwright
 from playwright.async_api import async_playwright, Playwright, Page
 
 # Constants
-ACTION_TYPES = ["click", "type", "select", "ignore", "finish_task"]
+ACTION_TYPES = ["click", "type", "select", "ignore", "finish_task", "final_click"]
 DEFAULT_URL = "https://www.digikala.com/"
 ANNOTATION_DATA_DIR = "annotation_data"
 with open("mouse_control.js") as f:
     mouse_control_js = f.read()
-
 
 
 class AnnotationFramework:
@@ -30,25 +31,84 @@ class AnnotationFramework:
         self.context = None
         self.page: Optional[Page] = None
         self.logger = self._setup_logger()
+        self.task_name = None
+        self.is_tracing = False
+        self.root_path = os.getcwd()
 
-    def _setup_logger(self):
+    async def set_task_name(self):
+        chars = string.ascii_lowercase + string.ascii_uppercase + string.digits
+        self.task_name = ''.join(random.choice(chars) for _ in range(8))
+        os.makedirs(self.main_path, exist_ok=True)
+        os.makedirs(os.path.join(self.main_path, 'playwright_traces'), exist_ok=True)
+
+    @staticmethod
+    def _setup_logger():
         """Setup logging"""
         logger = logging.getLogger("AnnotationFramework")
         logger.setLevel(logging.INFO)
-        if not logger.hasHandlers(): # Avoid adding multiple handlers on reload
+        if not logger.hasHandlers():  # Avoid adding multiple handlers on reload
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
             logger.addHandler(handler)
         return logger
 
+    async def start_playwright_tracing_chunk(self, time_step):
+        # await self.context.tracing.start_chunk(
+        #     title=f'Step-{time_step}',
+        #     name=f"{time_step}"
+        # )
+        # self.logger.info(f"sstart recording a chunk")
+        pass
+
+    async def stop_playwright_tracing_chunk(self, time_step):
+        # path =os.path.join(self.main_path, 'playwright_traces', f'{time_step}.zip')
+        # self.logger.info(f"save action recording to {path}")
+        # await self.context.tracing.stop_chunk(
+        #     path=path)
+        pass
+
+    @property
+    def main_path(self):
+        return os.path.join(self.root_path, "annotation_data", self.task_name)
+
+    async def start_recording(self):
+        if self.is_tracing:
+            self.logger.error(f"I were recording but were started again")
+            return
+        try:
+            await self.context.tracing.start(screenshots=True, snapshots=True)
+            self.logger.info(
+                "start total task recording await self.context.tracing.start(screenshots=True, snapshots=True)")
+            self.is_tracing = True
+        except Exception as e:
+            self.logger.error(f"failed to start total task recording, error:{e}")
+
+    async def end_recording(self):
+        if not self.is_tracing:
+            self.logger.error(f"I weren't recording but were stoped")
+            return
+        path = os.path.join(self.main_path, "playwright_traces", "main_trace.zip")
+        try:
+            self.is_tracing=False
+            await self.context.tracing.stop(path=path)
+            self.logger.info(f"save total recording to {path}")
+        except Exception as e:
+            self.logger.error(f"error saving total recording to {path}, error:{e}")
+
     async def start(self, website=DEFAULT_URL):
         """Start the browser and navigate to the specified website"""
         try:
             self.playwright = await async_playwright().start()
             # Consider launching in headed mode for the user to see
-            self.browser = await self.playwright.chromium.launch(headless=False)
-            self.context = await self.browser.new_context()
+            self.browser = await self.playwright.chromium.launch(headless=False,
+                                                                 traces_dir=os.path.join(self.root_path, "annotation_data", "tr") )
+
+            primary_monitor = get_monitors()[0]
+            self.context = await self.browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+                viewport={"width": int(primary_monitor.width * 5 / 10),
+                          "height": int(primary_monitor.height * 21 / 30)})
             self.page = await self.context.new_page()
 
             # Navigate to website
@@ -57,17 +117,32 @@ class AnnotationFramework:
             return self.page
         except Exception as e:
             self.logger.error(f"Error starting Playwright: {e}")
-            await self.stop() # Clean up if start fails partially
-            raise # Re-raise the exception
+            await self.stop()  # Clean up if start fails partially
+            raise  # Re-raise the exception
+
+    async def refresh_page(self):
+        """Refresh the current browser page"""
+        try:
+            if not self.page:
+                self.logger.error("Cannot refresh: No active page")
+                return False
+
+            # Reload the current page
+            await self.page.reload()
+            self.logger.info("Browser page refreshed successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error refreshing browser: {e}")
+            return False
 
     async def stop(self):
         """Stop the browser"""
         self.logger.info("Stopping Playwright...")
         if self.page and not self.page.is_closed():
-             try:
-                 await self.page.close()
-             except Exception as e:
-                 self.logger.warning(f"Error closing page: {e}")
+            try:
+                await self.page.close()
+            except Exception as e:
+                self.logger.warning(f"Error closing page: {e}")
         if self.context:
             try:
                 await self.context.close()
@@ -102,16 +177,16 @@ class AnnotationFramework:
             # Use a unique name or check if already exposed if page reloads cause issues
             self.logger.info("Element tracking script injected and callback exposed.")
         except Exception as e:
-            self.logger.error(f"Error setting up element tracking: {e}")
+            self.logger.error(f"Error setting up 'element racking': {e}")
             raise
 
     async def set_annotation_mode(self, enabled: bool):
-         if not self.page: return
-         try:
-             await self.page.evaluate(f"window.setAnnotationMode({str(enabled).lower()})")
-             self.logger.info(f"Annotation mode set to {enabled} in browser.")
-         except Exception as e:
-             self.logger.error(f"Error setting annotation mode in browser: {e}")
+        if not self.page: return
+        try:
+            await self.page.evaluate(f"window.setAnnotationMode({str(enabled).lower()})")
+            self.logger.info(f"Annotation mode set to {enabled} in browser.")
+        except Exception as e:
+            self.logger.error(f"Error setting annotation mode in browser: {e}")
 
     async def unlock_element_in_browser(self):
         if not self.page: return
@@ -122,13 +197,13 @@ class AnnotationFramework:
             self.logger.error(f"Error unlocking element in browser: {e}")
 
     async def get_selected_element_data_from_browser(self) -> Optional[Dict]:
-         if not self.page: return None
-         try:
-             element_data = await self.page.evaluate("() => window._selectedElement")
-             return element_data
-         except Exception as e:
-             self.logger.error(f"Error getting selected element data from browser: {e}")
-             return None
+        if not self.page: return None
+        try:
+            element_data = await self.page.evaluate("() => window._selectedElement")
+            return element_data
+        except Exception as e:
+            self.logger.error(f"Error getting selected element data from browser: {e}")
+            return None
 
     async def _find_element(self, element_data: Dict):
         """Helper to find element using various strategies"""
@@ -143,28 +218,27 @@ class AnnotationFramework:
                 if count == 1:
                     return self.page.locator(f"xpath={xpath}")
                 else:
-                     self.logger.warning(f"XPath '{xpath}' matched {count} elements, expected 1. Trying other methods.")
+                    self.logger.warning(f"XPath '{xpath}' matched {count} elements, expected 1. Trying other methods.")
             except Exception as e:
-                 self.logger.warning(f"XPath '{xpath}' failed: {e}. Trying other methods.")
+                self.logger.warning(f"XPath '{xpath}' failed: {e}. Trying other methods.")
 
         # Try ID if available
         element_id = element_data.get('id')
         if element_id:
             selector = f"#{element_id}"
             try:
-                 count = await self.page.locator(selector).count()
-                 if count == 1:
-                     return self.page.locator(selector)
-                 else:
-                     self.logger.warning(f"ID selector '{selector}' matched {count} elements. Trying other methods.")
+                count = await self.page.locator(selector).count()
+                if count == 1:
+                    return self.page.locator(selector)
+                else:
+                    self.logger.warning(f"ID selector '{selector}' matched {count} elements. Trying other methods.")
             except Exception as e:
-                 self.logger.warning(f"ID selector '{selector}' failed: {e}. Trying other methods.")
+                self.logger.warning(f"ID selector '{selector}' failed: {e}. Trying other methods.")
 
         # If nothing worked
         error_msg = f"Could not reliably locate element: {element_data}"
         self.logger.error(error_msg)
         raise Exception(error_msg)
-
 
     async def click_element(self, element_data: Dict):
         """Click an element based on element data"""
@@ -173,7 +247,7 @@ class AnnotationFramework:
             return False
         try:
             element_locator = await self._find_element(element_data)
-            await element_locator.click(timeout=5000) # Add timeout
+            await element_locator.click(timeout=5000)  # Add timeout
             self.logger.info(f"Clicked element: {element_data.get('tagName')}")
             return True
         except Exception as e:
@@ -187,7 +261,7 @@ class AnnotationFramework:
             return False
         try:
             element_locator = await self._find_element(element_data)
-            await element_locator.fill(text, timeout=5000) # Use fill for inputs, add timeout
+            await element_locator.fill(text, timeout=5000)  # Use fill for inputs, add timeout
             self.logger.info(f"Typed '{text}' into element: {element_data.get('tagName')}")
             return True
         except Exception as e:
@@ -215,12 +289,28 @@ class AnnotationFramework:
             self.logger.error(f"Error selection option into element ({element_data.get('xpath', 'N/A')}): {e}")
             return False
 
+
+
 # --- NiceGUI Application Class ---
 class AnnotationUI:
     def __init__(self):
+        # UI elements
+        self.record_button = None
+        self.value_input = None
+        self.value_input = None
+        self.action_select = None
+        self.task_button = None
+        self.task_input = None
+        self.launch_button = None
+        self.url_input = None
+        self.main_container = None
+        self.options_select = None
+        self.current_selected_option = None
+        self.selected_element_options = None
+
         self.framework = AnnotationFramework()
-        self.log = None # Placeholder for ui.log
-        self.status_label = None # Placeholder for status ui.label
+        self.log = None  # Placeholder for ui.log
+        self.status_label = None  # Placeholder for status ui.label
 
         # --- State Variables ---
         self.url: str = DEFAULT_URL
@@ -240,15 +330,13 @@ class AnnotationUI:
         self.setup_ui()
         self.setup_api_endpoints()
 
-
     def add_to_log(self, message: str):
         """Add message to the NiceGUI log"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
-        print(log_entry) # Also print to console for debugging
         self.current_log_messages.append(log_entry)
         if self.log:
-            self.log.push(log_entry) # Push to NiceGUI log component
+            self.log.push(log_entry)  # Push to NiceGUI log component
 
     def update_status(self, message: str):
         """Update the status label"""
@@ -274,7 +362,7 @@ class AnnotationUI:
         try:
             await self.framework.start(website=self.url)
             if not self.framework.page:
-                 raise Exception("Framework started but page object is missing.")
+                raise Exception("Framework started but page object is missing.")
 
             # Setup element tracking *after* page is loaded
             await self.framework.setup_element_tracking()
@@ -289,15 +377,17 @@ class AnnotationUI:
         except Exception as e:
             self.add_to_log(f"Error launching browser: {e}")
             self.update_status(f"Browser launch failed! Check URL and console logs. Error: {e}")
-            await self.framework.stop() # Ensure cleanup
+            await self.framework.stop()  # Ensure cleanup
             self.browser_launched = False
             # Re-enable launch button on failure
             self.launch_button.enable()
             self.url_input.enable()
 
-
     async def start_task(self):
         """Start the task annotation process"""
+        await self.framework.set_task_name()
+        await self.framework.start_recording()
+        await self.framework.refresh_page()
         await self.framework.setup_element_tracking()
         if not self.browser_launched or not self.framework.page:
             ui.notify("Browser not launched successfully.", type='negative')
@@ -318,12 +408,10 @@ class AnnotationUI:
         # Enable element tracking in browser via JS function
         self.element_tracking_active = True
         await self.framework.set_annotation_mode(True)
-
         self.update_status("Task in progress. Click elements in browser and record actions.")
 
     async def handle_element_selection(self):
         """Fetch selected element data and update UI"""
-        print("Element selection handler called")
         if not self.element_tracking_active or not self.framework.page:
             print("Element tracking inactive or no page available")
             return  # Don't process if tracking isn't active
@@ -477,7 +565,7 @@ class AnnotationUI:
     async def record_action(self):
         """Record the selected action and value for the selected element."""
         action_type = self.selected_action
-        action_value = self.action_value # Get value from bound variable
+        action_value = self.action_value  # Get value from bound variable
 
         # --- Handle IGNORE action ---
         if action_type == "ignore":
@@ -493,65 +581,70 @@ class AnnotationUI:
                 self.value_input.disable()
             else:
                 ui.notify("No element is currently selected to ignore.", type='warning')
-            return # Stop processing here for ignore action
+            return  # Stop processing here for ignore action
 
         # --- Handle FINISH_TASK action ---
         if action_type == "finish_task":
             await self.finish_task()
-            return # Stop processing here for finish action
+            return  # Stop processing here for finish action
 
         # --- Handle other actions (click, type, select) ---
         if not self.selected_element:
             ui.notify("Please select an element in the browser first.", type='warning')
             return
-
+        action_time = datetime.now()
         await self.framework.unlock_element_in_browser()
         await self.framework.set_annotation_mode(False)
         await asyncio.sleep(0.1)
+        await self.framework.start_playwright_tracing_chunk(action_time.isoformat().replace(":", "_").replace(".", "_"))
         # --- Create and Store Action ---
         action_record = {
             "type": action_type,
             "value": action_value,
-            "element": self.selected_element, # Store details of the element acted upon
-            "timestamp": datetime.now().isoformat(),
+            "element": self.selected_element,  # Store details of the element acted upon
+            "timestamp": action_time.isoformat().replace(":", "_").replace(".", "_"),
         }
         self.task_actions.append(action_record)
         log_msg = f"Recorded: {action_type}"
         if action_value: log_msg += f" - Value: '{action_value}'"
-        log_msg += f" on <{self.selected_element.get('tagName','?')}>"
+        log_msg += f" on <{self.selected_element.get('tagName', '?')}>"
         self.add_to_log(log_msg)
 
         # --- Execute Action in Browser (Optional but Recommended) ---
         action_executed = False
-        if action_type == "click":
+        if action_type == "final_click":
+            action_executed = True
+        elif action_type == "click":
             action_executed = await self.framework.click_element(self.selected_element)
         elif action_type == "type":
             action_executed = await self.framework.type_text(self.selected_element, action_value)
         elif action_type == "select":
-             action_executed = await self.framework.select_option(self.selected_element, action_value)
+            action_executed = await self.framework.select_option(self.selected_element, action_value)
         else:
-             # Should not happen if action types are validated
-             self.add_to_log(f"Warning: Unknown action type '{action_type}' encountered during execution.")
-             action_executed = True # Treat as success to proceed
+            # Should not happen if action types are validated
+            self.add_to_log(f"Warning: Unknown action type '{action_type}' encountered during execution.")
+            action_executed = True  # Treat as success to proceed
 
-
+        await self.framework.stop_playwright_tracing_chunk(action_time.isoformat().replace(":", "_").replace(".", "_"))
         # --- Post-Action Cleanup ---
         await self.framework.set_annotation_mode(True)
         # Clear value input and selected element state
         self.action_value = ""
-        self.value_input.update() # Clear the NiceGUI input field
+        self.value_input.update()  # Clear the NiceGUI input field
         self.selected_element = None
 
         if action_executed:
             self.update_status("Action recorded and executed. Select next element.")
         else:
-             self.update_status("Action recorded but FAILED execution. Select next element.")
-             ui.notify(f"Execution failed for {action_type}. Check browser/logs.", type='negative')
+            self.update_status("Action recorded but FAILED execution. Select next element.")
+            ui.notify(f"Execution failed for {action_type}. Check browser/logs.", type='negative')
 
         # Disable record button until next selection?
         self.record_button.disable()
         self.action_select.disable()
         self.value_input.disable()
+        if action_type == "final_click":
+            await self.finish_task()
 
     async def finish_task(self):
         """Finalize the task and save data."""
@@ -574,31 +667,29 @@ class AnnotationUI:
             filename = await self.save_task_data()
             self.add_to_log(f"Task data saved successfully to {filename}")
             ui.notify(f"Task data saved to {filename}", type='positive')
-        except Exception as e:
-             self.add_to_log(f"Error saving task data: {e}")
-             ui.notify(f"Failed to save task data: {e}", type='negative')
+            await self.framework.end_recording()
 
+        except Exception as e:
+            self.add_to_log(f"Error saving task data: {e}")
+            ui.notify(f"Failed to save task data: {e}", type='negative')
 
         # Reset UI state for a new task (keep browser open)
         self.selected_element = None
         self.task_actions = []
         self.action_select.disable()
-        self.value_input.set_value("") # Clear value
+        self.value_input.set_value("")  # Clear value
         self.value_input.disable()
         self.record_button.disable()
 
         self.task_input.enable()
-        self.task_button.enable() # Allow starting a new task
-        self.task_description = "" # Clear description
+        self.task_button.enable()  # Allow starting a new task
+        self.task_description = ""  # Clear description
         self.task_input.update()
 
         self.update_status("Task finished and saved. Ready for new task or close browser.")
 
-
     async def save_task_data(self):
         """Save task data to JSON file"""
-        os.makedirs(ANNOTATION_DATA_DIR, exist_ok=True)
-
         task_data = {
             "task_description": self.task_description,
             "website": self.url,
@@ -606,13 +697,10 @@ class AnnotationUI:
             "actions": self.task_actions
         }
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Sanitize task description for filename (optional)
-        safe_desc = "".join(c for c in self.task_description if c.isalnum() or c in (' ', '_')).rstrip()[:30]
-        filename = os.path.join(ANNOTATION_DATA_DIR, f"task_{timestamp}_{safe_desc}.json")
+        filename = os.path.join(self.framework.main_path, f"actions.json")
 
         with open(filename, "w") as f:
-            json.dump(task_data, f, indent=4) # Use indent for readability
+            json.dump(task_data, f, indent=4)  # Use indent for readability
 
         return filename
 
@@ -621,7 +709,6 @@ class AnnotationUI:
         self.add_to_log("Application shutting down...")
         await self.framework.stop()
         self.add_to_log("Cleanup finished.")
-
 
     def on_action_select(self, e):
         # Update the selected action
@@ -633,7 +720,7 @@ class AnnotationUI:
 
     # --- UI Setup Method ---
     def setup_ui(self):
-        self.main_container =ui.column().classes('h-screen w-full fixed left-0 top-0 bg-gray-100 overflow-auto p-1')
+        self.main_container = ui.column().classes('h-screen w-full fixed left-0 top-0 bg-gray-100 overflow-auto p-1')
         # Change max-w-2/3 to w-2/3 to set the exact width
         with self.main_container:
             # URL Section
@@ -654,10 +741,10 @@ class AnnotationUI:
                 with ui.row().classes('w-full items-center align-top'):
                     # Replace input with textarea for multi-line support
                     self.task_input = ui.textarea('Task Description', placeholder='e.g., Search for product X',
-                                               value=self.task_description,
-                                               on_change=lambda e: setattr(self, 'task_description', e.value)) \
+                                                  value=self.task_description,
+                                                  on_change=lambda e: setattr(self, 'task_description', e.value)) \
                         .props('dense outlined rows=2').classes('flex-grow').bind_enabled_from(self,
-                                                                                        'browser_launched')
+                                                                                               'browser_launched')
 
                     # Position the task button next to the input field (align to top)
                     self.task_button = ui.button('', on_click=self.start_task) \
@@ -673,7 +760,6 @@ class AnnotationUI:
                 self.value_input = ui.input('Value (if applicable)', value=self.action_value,
                                             on_change=lambda e: setattr(self, 'action_value', e.value)) \
                     .props('dense outlined').classes('w-full')
-
 
                 # Create options dropdown container (initially hidden)
                 with ui.element('div').classes('w-full mt-1') as self.options_dropdown_container:
@@ -718,7 +804,7 @@ class AnnotationUI:
 
 
 # --- Main Execution ---
-if __name__ in {"__main__", "__mp_main__"}: # Need __mp_main__ for multiprocessing spawn
+if __name__ in {"__main__", "__mp_main__"}:  # Need __mp_main__ for multiprocessing spawn
     # Create the UI instance *before* ui.run
     annotation_app = AnnotationUI()
 
