@@ -3,6 +3,10 @@ pip install nicegui playwright pandas # Added pandas as Playwright might need it
 playwright install chromium 
 ```
 
+Run with 
+
+`python uibased.py`
+
 ### TODO:
 
 - Making an application using this code! (windows/Mac/linux)
