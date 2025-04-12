@@ -369,6 +369,11 @@ class AnnotationUI:
     # --- Async Handlers ---
     async def launch_browser(self):
         """Launch Playwright browser and navigate"""
+        if self.browser_launched:
+            # kill the previous browser
+            await self.framework.stop()
+            self.browser_launched = False
+
         if not self.url.startswith(('http://', 'https://')):
             self.url = f"https://{self.url}"
             ui.notify(f"Assuming HTTPS. URL updated to: {self.url}", type='info')
@@ -377,9 +382,7 @@ class AnnotationUI:
 
         self.update_status(f"Launching browser for {self.url}...")
         self.add_to_log(f"Attempting to launch browser at: {self.url}")
-        # Disable launch button immediately
-        self.launch_button.disable()
-        self.url_input.disable()
+
 
         try:
             await self.framework.start(website=self.url)
