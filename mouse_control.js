@@ -186,7 +186,7 @@
         // Remove green highlights from all secondary elements
         if (window._secondaryElements && window._secondaryElements.length > 0) {
             window._secondaryElements.forEach((element) => {
-                element.domElement.classList.remove('annotation-secondary');
+                 element?.domElement?.classList?.remove('annotation-secondary');
             });
             window._secondaryElements = []; // Clear secondary elements array
         }

@@ -346,6 +346,7 @@ class AnnotationUI:
         self.framework = AnnotationFramework()
         self.log = None  # Placeholder for ui.log
         self.status_label = None  # Placeholder for status ui.label
+        self.selected_element_options = None
 
         # --- State Variables ---
         self.url: str = DEFAULT_URL
@@ -356,7 +357,7 @@ class AnnotationUI:
         self.current_log_messages: List[str] = ["Annotation Console initialized."]
 
         self.selected_element: Optional[Dict] = None
-        self.selected_element_options: List[Dict] = []
+        self.secondary_selected_element: List[Dict] = []
         self.element_tracking_active: bool = False
         self.task_started: bool = False
         self.browser_launched: bool = False
