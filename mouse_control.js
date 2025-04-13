@@ -12,10 +12,15 @@
             background-color: rgba(0, 0, 255, 0.1) !important;
             cursor: pointer !important;
         }
-        .annotation-locked {
-            outline: 3px solid red !important;
+        .annotation-primary { /* Golden selection */
+            outline: 3px solid gold !important;
             outline-offset: 2px !important;
-            background-color: rgba(255, 0, 0, 0.1) !important;
+            background-color: rgba(255, 215, 0, 0.3) !important;
+        }
+        .annotation-secondary { /* Green selection */
+            outline: 2px solid green !important;
+            outline-offset: 1px !important;
+            background-color: rgba(0, 128, 0, 0.2) !important;
         }
     `;
     // Remove old style if it exists
@@ -28,7 +33,8 @@
     window._selectedElement = null;
     window._elementLocked = false;
     window._currentHighlightedElement = null;
-    window._lockedElement = null; // Store the locked element itself
+    window._lockedElement = null; // Store golden ("primary") element
+    window._secondaryElements = []; // To save green ("secondary") elements
 
     // Remove previous listeners if they exist to prevent duplicates
     if (window._annotationMouseoverListener) {
@@ -50,12 +56,11 @@
         window.removeEventListener('change', window._annotationChangeListener, true);
     }
 
-
     // Hover handler
     window._annotationMouseoverListener = (event) => {
-        if (!window._annotationMode || window._elementLocked) return;
+        if (!window._annotationMode) return;
         const element = event.target;
-        if (element.classList.contains('annotation-locked')) return; // Don't highlight locked
+        if (element.classList.contains('annotation-primary') || element.classList.contains('annotation-secondary')) return; // Skip locked elements
 
         // Remove highlight from previous element if exists
         if (window._currentHighlightedElement && window._currentHighlightedElement !== element) {
@@ -63,46 +68,15 @@
         }
 
         // Highlight current element
-        if (!element.classList.contains('annotation-locked')) {
-            element.classList.add('annotation-highlight');
-        }
+        element.classList.add('annotation-highlight');
         window._currentHighlightedElement = element;
     };
-    // Add these new event listeners to prevent select dropdown and input typing
-window._annotationKeydownListener = (event) => {
-    if (window._annotationMode) {
-        // Prevent typing in input fields
-        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable) {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-        }
-    }
-};
-
-window._annotationSelectListener = (event) => {
-    if (window._annotationMode) {
-        // Prevent select elements from opening
-        if (event.target.tagName === 'SELECT') {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-        }
-    }
-};
-
-// Prevent change events on form elements
-window._annotationChangeListener = (event) => {
-    if (window._annotationMode) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-    }
-};
     window.addEventListener('mouseover', window._annotationMouseoverListener);
 
     // Mouse out handler
     window._annotationMouseoutListener = (event) => {
-        if (!window._annotationMode || window._elementLocked) return;
         const element = event.target;
-        if (element === window._currentHighlightedElement && !window._elementLocked) {
+        if (element === window._currentHighlightedElement) {
             element.classList.remove('annotation-highlight');
             window._currentHighlightedElement = null;
         }
@@ -117,38 +91,54 @@ window._annotationChangeListener = (event) => {
         event.preventDefault();
         event.stopImmediatePropagation(); // More forceful than stopPropagation
 
-        // If an element is already locked, don't select a new one
-        if (window._elementLocked) return;
-
         const element = event.target;
 
-        // Remove highlighting from previous element
-        if (window._currentHighlightedElement) {
-            window._currentHighlightedElement.classList.remove('annotation-highlight');
+        // Primary (gold) selection triggered first
+        if (!window._elementLocked) {
+            window._elementLocked = true;
+            element.classList.remove('annotation-highlight'); // Remove blue highlight
+            element.classList.add('annotation-primary'); // Add golden highlight
+
+            // Store data for the selected element
+            window._selectedElement = {
+                tagName: element.tagName,
+                id: element.id,
+                className: element.className,
+                textContent: element.textContent?.trim().substring(0, 100),
+                value: element.value, // Capture input value
+                xpath: getXPath(element),
+                attributes: getAttributes(element)
+            };
+
+            // Store reference to locked element
+            window._lockedElement = element;
+
+            console.log('Selected primary element (golden):', JSON.stringify(window._selectedElement));
+            fetch('http://127.0.0.1:8080/api/notify-primary-selected', {mode: 'no-cors' });
+        } else {
+            // Secondary (green) element clicked
+            if (!element.classList.contains('annotation-secondary') && element !== window._lockedElement) {
+                element.classList.remove('annotation-highlight');
+                element.classList.add('annotation-secondary'); // Add green highlight
+
+                // Store data for the secondary element
+                const secondaryElementData = {
+                    tagName: element.tagName,
+                    id: element.id,
+                    className: element.className,
+                    textContent: element.textContent?.trim().substring(0, 100),
+                    value: element.value, // Capture input value
+                    xpath: getXPath(element),
+                    attributes: getAttributes(element)
+                };
+
+                window._secondaryElements.push(secondaryElementData);
+                console.log('Selected secondary element (green):', JSON.stringify(secondaryElementData));
+                fetch('http://127.0.0.1:8080/api/notify-secondary-selected', {mode: 'no-cors' });
+            }
         }
-
-        // Lock the selected element
-        window._elementLocked = true;
-        element.classList.remove('annotation-highlight'); // Remove blue highlight
-        element.classList.add('annotation-locked'); // Add red locked highlight
-
-        // Store element data
-        window._selectedElement = {
-            tagName: element.tagName,
-            id: element.id,
-            className: element.className,
-            textContent: element.textContent?.trim().substring(0, 100),
-            value: element.value, // Capture input value
-            xpath: getXPath(element),
-            attributes: getAttributes(element)
-        };
-
-        // Store reference to locked element
-        window._lockedElement = element;
-        console.log('Selected element:', JSON.stringify(window._selectedElement));
-        // Notify Python that an element was selected
-        fetch('http://127.0.0.1:8080/api/notify-element-selected', {mode: 'no-cors' });
     };
+    window.addEventListener('click', window._annotationClickListener, true);
 
     // Add these new event listeners to prevent select dropdown and input typing
     window._annotationKeydownListener = (event) => {
@@ -179,22 +169,32 @@ window._annotationChangeListener = (event) => {
         }
     };
 
-    window.addEventListener('click', window._annotationClickListener, true);
     window.addEventListener('keydown', window._annotationKeydownListener, true);
     window.addEventListener('mousedown', window._annotationSelectListener, true);
     window.addEventListener('change', window._annotationChangeListener, true);
 
-    // Function to unlock element (will be called from Python)
+    // Function to unlock primary element
     window.unlockElement = () => {
+        // Remove golden highlight from the primary element
         if (window._lockedElement) {
-            window._lockedElement.classList.remove('annotation-locked');
+            window._lockedElement.classList.remove('annotation-primary');
             window._lockedElement = null;
         }
         window._elementLocked = false;
         window._selectedElement = null; // Clear data when unlocking
-        console.log('Element unlocked');
+
+        // Remove green highlights from all secondary elements
+        if (window._secondaryElements && window._secondaryElements.length > 0) {
+            window._secondaryElements.forEach((element) => {
+                element.domElement.classList.remove('annotation-secondary');
+            });
+            window._secondaryElements = []; // Clear secondary elements array
+        }
+
+        console.log('All elements unlocked');
         return true;
     };
+
 
     // Function to enable/disable annotation mode
     window.setAnnotationMode = (enabled) => {
@@ -206,12 +206,12 @@ window._annotationChangeListener = (event) => {
             document.body.style.cursor = 'crosshair';
         } else {
             document.body.style.cursor = '';
-            window.unlockElement(); // Ensure unlock when disabling
+            window.unlockElement(); // Ensure unlocking primary element when disabling
+            window._secondaryElements = []; // Clear secondary elements
         }
     };
 
-
-    // Helper functions (same as before)
+    // Helper functions
     function getXPath(element) {
         if (element.id !== '')
             return `//*[@id="${element.id}"]`;
@@ -240,4 +240,4 @@ window._annotationChangeListener = (event) => {
 
     window._annotationSetupDone = true; // Mark setup as done
     console.log('Annotation script setup complete.');
-}
+};

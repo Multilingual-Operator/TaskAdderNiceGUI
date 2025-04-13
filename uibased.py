@@ -211,6 +211,19 @@ class AnnotationFramework:
             self.logger.error(f"Error getting selected element data from browser: {e}")
             return None
 
+    async def get_secondary_selected_elements_data_from_browser(self) -> Optional[List[Dict]]:
+        if not self.page:
+            return None
+        try:
+            # Evaluate `window._secondaryElements` in the browser context
+            secondary_elements_data = await self.page.evaluate(
+                "() => window._secondaryElements.map(e => ({ ...e, domElement: undefined }))")
+            # The `domElement` is excluded because Python can't process DOM objects
+            return secondary_elements_data
+        except Exception as e:
+            self.logger.error(f"Error getting secondary selected elements data from browser: {e}")
+            return None
+
     async def _find_element(self, element_data: Dict):
         """Helper to find element using various strategies"""
         if not self.page: raise Exception("Playwright page not available")
@@ -328,7 +341,7 @@ class AnnotationUI:
         self.main_container = None
         self.options_select = None
         self.current_selected_option = None
-        self.selected_element_options = None
+
 
         self.framework = AnnotationFramework()
         self.log = None  # Placeholder for ui.log
@@ -343,6 +356,7 @@ class AnnotationUI:
         self.current_log_messages: List[str] = ["Annotation Console initialized."]
 
         self.selected_element: Optional[Dict] = None
+        self.selected_element_options: List[Dict] = []
         self.element_tracking_active: bool = False
         self.task_started: bool = False
         self.browser_launched: bool = False
@@ -441,6 +455,39 @@ class AnnotationUI:
         self.element_tracking_active = True
         await self.framework.set_annotation_mode(True)
         self.update_status("Task in progress. Click elements in browser and record actions.")
+
+
+
+    async def handle_secondary_element_selection(self):
+        """Fetch selected element data and update UI"""
+        if not self.element_tracking_active or not self.framework.page:
+            print("Element tracking inactive or no page available")
+            return  # Don't process if tracking isn't active
+
+        try:
+            elements_data = await self.framework.get_secondary_selected_elements_data_from_browser()
+            element_data =elements_data[-1]
+            # Use a proper NiceGUI context by using the main container
+            with self.main_container:  # Assuming you have a main_container defined in your UI
+                self.add_to_log("Element selection detected in browser. Fetching data...")
+
+                if element_data:
+                    self.secondary_selected_element.append(element_data)
+                    tag = element_data.get('tagName', 'Unknown')
+                    text = element_data.get('textContent', '')[:50]  # Show first 50 chars
+                    xpath = element_data.get('xpath', 'N/A')
+                    self.add_to_log(f"Secondary Selected element: <{tag}> - '{text}' (XPath: {xpath})")
+                    if tag == "SELECT":
+                        # Fetch dropdown options
+                        secondary_selected_element_options = await self.get_dropdown_options(element_data)
+                        if secondary_selected_element_options:
+                            self.add_to_log(f"Found {len(secondary_selected_element_options)} dropdown options for Secondary Selected Element")
+                else:
+                    self.add_to_log("Failed to retrieve secondary selected element data from browser.")
+                    self.update_status("Error fetching secondary element data. Try selecting again.")
+
+        except Exception as e:
+            print(f"Error in handle_secondary_element_selection: {e}")
 
     async def handle_element_selection(self):
         """Fetch selected element data and update UI"""
@@ -606,6 +653,7 @@ class AnnotationUI:
                 # Unlock element in browser
                 await self.framework.unlock_element_in_browser()
                 self.selected_element = None
+                self.secondary_selected_element = []
                 self.update_status("Element ignored. Select another element.")
                 # Disable record button until next selection? Or keep enabled?
                 self.record_button.disable()
@@ -629,6 +677,7 @@ class AnnotationUI:
             "type": action_type,
             "value": action_value,
             "element": self.selected_element,  # Store details of the element acted upon
+            "secondary_elements": self.secondary_selected_element,
             "timestamp": action_time.isoformat(),
             "screenshot": await self.framework.get_screenshot(),
             "raw_html": await self.framework.get_raw_html()
@@ -661,7 +710,7 @@ class AnnotationUI:
         self.action_value = ""
         self.value_input.update()  # Clear the NiceGUI input field
         self.selected_element = None
-
+        self.secondary_selected_element = []
         if action_executed:
             self.update_status("Action recorded and executed. Select next element.")
         else:
@@ -711,6 +760,7 @@ class AnnotationUI:
 
         # Reset UI state for a new task (keep browser open)
         self.selected_element = None
+        self.secondary_selected_element = []
         self.task_actions = []
         self.action_select.disable()
         self.value_input.set_value("")  # Clear value
@@ -858,12 +908,20 @@ class AnnotationUI:
     def setup_api_endpoints(self):
         """Set up API endpoints for browser-to-Python communication"""
 
-        @app.get('/api/notify-element-selected')
-        async def notify_element_selected():
+        @app.get('/api/notify-primary-selected')
+        async def notify_primary_element_selected():
             """API endpoint that JavaScript can call when an element is selected"""
             # Directly call the handler without checking context.client.connected
             # This avoids the UI context dependency
             asyncio.create_task(self.handle_element_selection())
+            return {'status': 'success'}
+
+        @app.get('/api/notify-secondary-selected')
+        async def notify_secondary_element_selected():
+            """API endpoint that JavaScript can call when an element is selected"""
+            # Directly call the handler without checking context.client.connected
+            # This avoids the UI context dependency
+            asyncio.create_task(self.handle_secondary_element_selection())
             return {'status': 'success'}
 
 
