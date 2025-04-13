@@ -34,6 +34,7 @@
     window._elementLocked = false;
     window._currentHighlightedElement = null;
     window._lockedElement = null; // Store golden ("primary") element
+    window._secondaryActualElement = []
     window._secondaryElements = []; // To save green ("secondary") elements
 
     // Remove previous listeners if they exist to prevent duplicates
@@ -133,6 +134,7 @@
                 };
 
                 window._secondaryElements.push(secondaryElementData);
+                window._secondaryActualElement.push(element);
                 console.log('Selected secondary element (green):', JSON.stringify(secondaryElementData));
                 fetch('http://127.0.0.1:8080/api/notify-secondary-selected', {mode: 'no-cors' });
             }
@@ -183,12 +185,13 @@
         window._elementLocked = false;
         window._selectedElement = null; // Clear data when unlocking
 
-        // Remove green highlights from all secondary elements
-        if (window._secondaryElements && window._secondaryElements.length > 0) {
-            window._secondaryElements.forEach((element) => {
-                 element?.domElement?.classList?.remove('annotation-secondary');
+    // Remove green highlights from all secondary elements
+        if (window._secondaryActualElement && window._secondaryActualElement.length > 0) {
+            window._secondaryActualElement.forEach((element) => {
+                element.classList.remove('annotation-secondary');
             });
             window._secondaryElements = []; // Clear secondary elements array
+            window._secondaryActualElement = [];
         }
 
         console.log('All elements unlocked');
